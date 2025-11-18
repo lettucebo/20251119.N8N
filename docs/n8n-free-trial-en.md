@@ -32,7 +32,7 @@ The n8n Cloud free trial grants 14 days of Pro-plan capabilities—Global Variab
 
 ![Screenshot Placeholder – Step 1](./images/placeholder-step1.png)
 
-Visit [n8n Cloud](https://n8n.io/pricing/) and click "Get started for free". Provide your name plus work email, then submit to receive the workspace-creation link in your inbox.
+Head to the [n8n Cloud](https://n8n.io/) home page and click "Get started for free" to begin the signup wizard.
 
 ![Screenshot Placeholder – Step 2](./images/placeholder-step2.png)
 
