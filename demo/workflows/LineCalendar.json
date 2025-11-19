@@ -1,0 +1,441 @@
+{
+  "name": "LineCalendar",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "db2d962b-3f35-4278-be83-02f3e5c21588",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -432,
+        304
+      ],
+      "id": "e51ffb2d-65be-4c18-a092-4cef126deb09",
+      "name": "Webhook",
+      "webhookId": "db2d962b-3f35-4278-be83-02f3e5c21588"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/push",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n    \"to\": \"U81025e615f2b5734e31d2715303acb5a\",\n    \"messages\":[\n        { \n            \"type\":\"text\",  \n            \"text\":\"行事曆建立成功\" \n        }\n    ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1040,
+        208
+      ],
+      "id": "6308608d-406d-4089-83b0-271d9b864e02",
+      "name": "HTTP Request: Send Line Msg",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Q9Kr3IDsWDjxH8dp",
+          "name": "Line Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.body.events[0].message.text }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=你是一個專業的日程管理助手。請分析用戶的訊息，提取可能的日程信息。\n\n🎯 **重要原則：每個分析結果只產生一個主要事件，將所有相關活動整合為完整的活動描述**\n\n🔍 **地點偵測規則**：\n1. 移動動詞後的地點：「去XX」、「到XX」、「往XX」、「赴XX」、「前往XX」、「出發到XX」、「飛往XX」\n2. 位置介詞後的地點：「在XX」、「於XX」、「位於XX」、「XX舉行」、「XX進行」、「XX召開」\n3. 常見地點類型：城市/國家、地標/景點、場所、線上場所、建築物\n4. 地點提取優先順序：具體地址 > 建築名稱 > 城市名稱 > 區域名稱\n5. 多地點活動：選擇主要集合地點或最重要的地點作為主要 location\n\n📅 **活動類型識別（重要）**：\n- **全天活動**：\n  - 旅遊、一日遊、出差、休假、節日慶典\n  - 研習營、工作坊、訓練營\n  - 多地點行程活動（即使有集合時間也算全天活動）\n  - 只提到日期沒有具體時間\n- **定時活動**：\n  - 單一地點的會議、簡報\n  - 有明確開始和結束時間的短時間活動\n  - 非旅遊性質的定時聚會\n\n🕐 **當前日期時間基準**：{{ DateTime.now().setZone('Asia/Taipei').toFormat('yyyy年MM月dd日 (cccc)', { locale: 'zh-TW' }) }}（台北時間）\n  - 當前年份：{{ DateTime.now().setZone('Asia/Taipei').toFormat('yyyy') }}\n  - 當前月份：{{ DateTime.now().setZone('Asia/Taipei').toFormat('MM') }}月\n\n⏰ **時間格式規則**：\n- 全天活動：startDateTime 和 endDateTime 都設為 \"YYYY-MM-DD\"（不包含時間部分），isAllDay: true\n- 定時活動：使用完整的 ISO 8601 格式 \"YYYY-MM-DDTHH:mm:ss+08:00\"，isAllDay: false\n- **年份推斷規則（重要）**：\n  - 如果訊息中明確指定年份，使用該年份\n  - 如果只有月/日沒有年份：\n    - 6月、7月、8月、9月、10月、11月、12月 → 使用 **2025年**\n    - 1月、2月、3月、4月 → 使用 **2026年**\n    - 5月 → 根據具體日期判斷，通常使用 **2025年**\n  - **範例**：「6/14活動」→ 2025-06-14（不是2024年！）\n  - 若完全無法推斷，預設使用 2025 年\n- 時區：Asia/Taipei (+08:00)\n\n⚠️ **重要提醒**：\n- 旅遊、一日遊、多地點活動即使有集合時間，也應該設為全天活動\n- 全天活動的開始和結束時間應該相同，格式為純日期\n\n📋 **詳細描述內容建構**：\n必須包含以下資訊（如果訊息中有提及）：\n1. **集合資訊**：集合時間、集合地點、停車資訊\n2. **完整行程**：按時間順序列出所有活動安排\n3. **費用明細**：各項費用（交通、餐費、門票等）\n4. **參與者資訊**：車手安排、參加人員\n5. **攜帶物品**：需要準備的物品或衣物\n6. **注意事項**：天氣、取消條件、其他重要提醒\n7. **聯絡資訊**：相關連結、參考資料（保持完整網址）\n\n👥 **參與者提取規則**：\n- **重要：attendees 欄位請保持空陣列 []，避免發送 Google Calendar 通知**\n- 所有參與者資訊（包含車手和乘客）都寫在 description 中\n- 這樣可以避免 Google Calendar 自動發送邀請通知\n\n💰 **費用資訊提取**：\n- 交通費、餐費、門票、其他雜費\n- 在 description 中詳細說明各項費用\n\n🔗 **連結處理**：\n- 保持網址完整，不要截斷\n- 如果連結太長，確保包含完整的可點擊網址\n\n🎯 **信心度評估**：\n- 0.9+：完整時間+地點+詳細行程+參與者資訊\n- 0.7-0.9：明確時間和地點，部分詳細資訊\n- 0.5-0.7：基本時間或地點，缺少詳細資訊\n- <0.5：缺乏關鍵信息\n\n請按照以下 JSON 格式回覆，不要添加任何其他文字：\n{\n  \"hasEvent\": true,\n  \"events\": [\n    {\n      \"title\": \"主要活動標題\",\n      \"description\": \"詳細的活動描述，包含完整行程安排、集合資訊、費用明細、參與者資訊、注意事項等\",\n      \"startDateTime\": \"2025-06-29\",\n      \"endDateTime\": \"2025-06-29\", \n      \"isAllDay\": true,\n      \"location\": \"主要集合地點或最重要的地點\",\n      \"attendees\": [],\n      \"confidence\": 0.95\n    }\n  ],\n  \"reasoning\": \"分析原因，說明如何整合多個活動為單一事件，以及信心度評估依據\"\n}\n\n**活動類型判斷範例**：\n- ✅ 全天活動：「三峽瀑布一日遊」→ isAllDay: true, startDateTime: \"2025-06-29\"\n- ✅ 全天活動：「6/14烤肉活動」→ isAllDay: true, startDateTime: \"2025-06-14\"\n- ✅ 全天活動：「工作坊」→ isAllDay: true, startDateTime: \"2025-06-15\"  \n- ✅ 定時活動：「下午2點開會」→ isAllDay: false, startDateTime: \"2025-06-01T14:00:00+08:00\"\n- ✅ 定時活動：「簡報1小時」→ isAllDay: false, startDateTime: \"2025-06-01T14:00:00+08:00\"\n\n**年份判斷重要提醒**：\n- ❌ 錯誤：「6/14活動」→ 2024-06-14\n- ✅ 正確：「6/14活動」→ 2025-06-14\n\n**描述格式建議**：\n使用清晰的結構化格式，將所有參與者資訊寫在描述中：\n```\n集合時間：9:30 a.m.；集合地點：三峽區竹崙路238號（禾煦熊空茶園外碰面+停車）。\n\n行程安排：\n• 上午：參訪禾煦熊空茶園\n• 中午：三峽插角133現烤胡椒雞用餐  \n• 下午：雲森瀑布健行+玩水泡腳\n• 傍晚：三峽老街自由活動\n\n費用：車資200元；餐費200-400元；茶園門票280元（可抵餐點100元）。\n\n車手安排：\n• @小泉：Vivian, Conni, Lucia\n• @bryan：Ting, Vera, 哲瑋\n• @韋成：小張, 謝小玥, 王美惠\n• @Money Yu：其他參與者\n\n注意事項：遇雨取消/改期，請攜帶換洗衣物。\n```\n\n現在請分析以下 Slack 訊息：「={{ $json.body.events[0].message.text }}」\n\n請將整個活動視為一個完整事件，把所有細節、行程安排、參與者資訊都整理在 description 中，直接回覆 JSON 格式，不要包含 ```json 標記，也不要包含換行符號。"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        -208,
+        304
+      ],
+      "id": "16f7e4ed-ded9-40af-b0c9-b335364f4fa4",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        528
+      ],
+      "id": "54160076-28a8-46a6-b698-3b45995c1cfd",
+      "name": "Azure OpenAI Chat Model",
+      "credentials": {
+        "azureOpenAiApi": {
+          "id": "4ZzBTyKK5krEFQMw",
+          "name": "Azure Open AI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n    \"hasEvent\": true,\n    \"events\": [\n        {\n            \"title\": \"11/23 太平山泡湯一日遊\",\n            \"description\": \"集合時間：03:00；集合地點：台北車站東三門。交通：包車平分（8人車），內建5人，正在徵3女同步加入團。（目前團內1女4男）行程安排：03:00 台北出發05:00 抵達太平山國家公園售票口05:40 到達太平山莊停車場07:00 購買第一班碰碰車票（只能現場購票）主要活動：1. 太平山觀景平台看日出雲海，並在附近步道欣賞楓葉。2. 興懷舊步道（檜木森林感）及檜木林步道。3. 太平山山毛櫸步道階梯旁觀賞楓葉（此步道時間較長，避免超時未計畫深入）。4. 見晴懷古步道：步道短、景點知名但必到的風景點。5. 鳩之澤：體驗泡湯，並可嘗試地熱水煮玉米、雞蛋等。詳細地點說明：• 太平山莊區域：建議搭乘碰碰車到茂興，探索茂興懷舊步道（檜木森林感）、檜木原始林步道（短）、鐵杉林步道。此外，太平山莊旁邊階梯的楓葉最近非常紅葉漂亮。• 翠峰湖區域：山毛櫸步道（建議步行時間約3小時）及翠峰湖環湖步道（步行環湖只需10分鐘，主要用於看湖）。由於部分路段封閉，目前只能通行到觀湖點。• 日出觀賞點推薦：太平山莊觀景平台、蹦蹦車站起點月台、翠峰景觀道路（14公里）觀日台、翠峰湖環山步道（0.8公里）觀湖平台或3公里處，望洋山步道終點（1.2公里）觀景台。費用明細：• 包車費用：8人平分• 泡湯費用：依個人選擇（現場支付）• 部分景點為免費，可自費選購地熱食品或門票（若適用）注意事項：• 碰碰車票僅當天現場購買，請準時到達。• 因部分步道封閉，請注意公告並遵守規範。• 行程涉及高山步行，請攜帶舒適的服裝與步行鞋。• 自備毛巾和輕便衣物以便泡湯使用。天氣及取消條件：遇重大降雨天氣可能取消或改期，將提前通知參加者。\",\n            \"startDateTime\": \"2025-11-23\",\n            \"endDateTime\": \"2025-11-23\",\n            \"isAllDay\": true,\n            \"location\": \"台北車站東三門\",\n            \"attendees\": [],\n            \"confidence\": 0.95\n        }\n    ],\n    \"reasoning\": \"本活動以『11/23 太平山泡湯⛰️一日遊』為主題，標明了集合時間和地點，並詳細列出了完整的行程規劃（包含日出、步道及泡湯活動）。活動地點主要在台北車站與太平山區。由於是多地點行程且跨整天，判斷為全天活動；信心度高主要基於詳細行程與參考資訊的完整性。\"\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -80,
+        528
+      ],
+      "id": "65feb9f3-465a-48ba-96a2-63ae14afd205",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===============================================\n// Process AI Response - 修正版 JavaScript 代碼\n// ===============================================\n\nconsole.log('🚀 開始處理 AI 回應...');\n\n// 1. 檢查基本輸入\nconst inputData = $input.first();\nif (!inputData || !inputData.json) {\n  console.log('❌ 沒有輸入數據，停止執行');\n  return [];\n}\n\nconsole.log('📥 輸入數據:', JSON.stringify(inputData.json, null, 2));\n\n// 2. 🔧 修正：直接取得 AI 輸出物件（不需要解析 JSON）\nlet aiOutput;\n\n// 檢查 output 是字串還是物件\nif (typeof inputData.json.output === 'string') {\n  // 如果是字串，需要解析\n  try {\n    const cleanResponse = inputData.json.output.replace(/```json\\n?|```\\n?/g, '').trim();\n    aiOutput = JSON.parse(cleanResponse);\n    console.log('✅ 從字串解析 AI 輸出');\n  } catch (error) {\n    console.log('❌ JSON 解析失敗:', error.message);\n    return [{\n      json: {\n        status: 'error',\n        error: `AI 回應解析失敗: ${error.message}`,\n        rawResponse: inputData.json.output\n      }\n    }];\n  }\n} else if (typeof inputData.json.output === 'object') {\n  // 如果已經是物件，直接使用\n  aiOutput = inputData.json.output;\n  console.log('✅ AI 輸出已經是物件格式');\n} else if (inputData.json.text) {\n  // 備用：檢查 text 欄位\n  try {\n    const cleanResponse = inputData.json.text.replace(/```json\\n?|```\\n?/g, '').trim();\n    aiOutput = JSON.parse(cleanResponse);\n    console.log('✅ 從 text 欄位解析 AI 輸出');\n  } catch (error) {\n    console.log('❌ 無法取得有效的 AI 輸出');\n    return [];\n  }\n} else {\n  console.log('❌ 找不到 AI 輸出數據');\n  return [];\n}\n\nconsole.log('🤖 AI 輸出內容:', JSON.stringify(aiOutput, null, 2));\n\n// 3. 檢查 Slack 原始數據（從上游節點）\nlet slackData = {};\ntry {\n  // 🔧 改良：更靈活地取得 Slack 數據\n  const allNodes = $input.all();\n  \n  // 先嘗試從第一個節點取得\n  if (allNodes.length > 0 && allNodes[0].json) {\n    slackData = allNodes[0].json;\n  }\n  \n  // 如果沒有 Slack 特徵，嘗試其他節點\n  if (!slackData.user && !slackData.channel) {\n    for (const node of allNodes) {\n      if (node.json && (node.json.user || node.json.channel || node.json.text)) {\n        slackData = node.json;\n        break;\n      }\n    }\n  }\n  \n  // 如果還是找不到，使用預設值\n  if (!slackData.user && !slackData.channel) {\n    slackData = {\n      text: inputData.json.originalMessage || '無法取得原始訊息',\n      user: 'unknown',\n      channel: 'unknown',\n      ts: Date.now().toString()\n    };\n  }\n  \n  console.log('📱 Slack 數據:', JSON.stringify(slackData, null, 2));\n} catch (error) {\n  console.log('⚠️ 取得 Slack 數據時發生錯誤:', error.message);\n  slackData = {\n    text: '無法取得原始訊息',\n    user: 'unknown',\n    channel: 'unknown',\n    ts: Date.now().toString()\n  };\n}\n\n// 4. 檢查 AI 是否找到事件\nif (!aiOutput.hasEvent || !aiOutput.events || aiOutput.events.length === 0) {\n  console.log('ℹ️ AI 沒有找到事件');\n  return [{\n    json: {\n      status: 'no_event',\n      message: '未找到有效的日程信息',\n      originalMessage: slackData.text,\n      slackUser: slackData.user,\n      slackChannel: slackData.channel,\n      slackTimestamp: slackData.ts,\n      reasoning: aiOutput.reasoning || '無法識別日程相關內容'\n    }\n  }];\n}\n\n// 5. 處理找到的事件\nconsole.log(`📅 找到 ${aiOutput.events.length} 個事件，開始處理`);\n\ntry {\n  const processedEvents = aiOutput.events.map((event, index) => {\n    console.log(`🔄 處理事件 ${index}:`, JSON.stringify(event, null, 2));\n    \n    // 驗證事件必要欄位\n    if (!event.title || !event.startDateTime) {\n      console.log(`⚠️ 事件 ${index} 缺少必要欄位，跳過`);\n      return null;\n    }\n\n    // 處理時間\n    let startDateTime, endDateTime, isAllDay;\n    let calendarStartDateTime, calendarEndDateTime;\n    \n    try {\n      // 檢查是否為全天活動\n      isAllDay = event.isAllDay === true || \n                 (!event.startDateTime.includes('T') && !event.endDateTime?.includes('T'));\n      \n      if (isAllDay) {\n        // 全天活動處理\n        console.log(`📅 事件 ${index} 是全天活動`);\n        \n        startDateTime = event.startDateTime.includes('T') \n          ? event.startDateTime.split('T')[0] \n          : event.startDateTime;\n        endDateTime = event.endDateTime \n          ? (event.endDateTime.includes('T') ? event.endDateTime.split('T')[0] : event.endDateTime)\n          : startDateTime;\n        \n        // 驗證日期格式\n        if (!startDateTime.match(/^\\d{4}-\\d{2}-\\d{2}$/)) {\n          throw new Error('全天活動日期格式錯誤');\n        }\n        \n        calendarStartDateTime = startDateTime;\n        calendarEndDateTime = endDateTime;\n        \n        console.log(`✅ 全天活動時間: ${startDateTime} 到 ${endDateTime}`);\n        \n      } else {\n        // 部分時間活動處理\n        console.log(`⏰ 事件 ${index} 是部分時間活動`);\n        \n        const startDate = new Date(event.startDateTime);\n        const endDate = new Date(event.endDateTime || event.startDateTime);\n        \n        if (isNaN(startDate.getTime())) {\n          throw new Error('無效的開始時間格式');\n        }\n        \n        // 如果結束時間無效或早於開始時間，預設為開始後1小時\n        if (isNaN(endDate.getTime()) || endDate <= startDate) {\n          endDate.setTime(startDate.getTime() + 60 * 60 * 1000);\n        }\n        \n        calendarStartDateTime = startDate.toISOString();\n        calendarEndDateTime = endDate.toISOString();\n        \n        console.log(`✅ 部分時間活動: ${calendarStartDateTime} 到 ${calendarEndDateTime}`);\n      }\n      \n    } catch (dateError) {\n      console.log(`⚠️ 事件 ${index} 時間處理失敗:`, dateError.message);\n      \n      // 預設為明天的全天活動\n      const tomorrow = new Date();\n      tomorrow.setDate(tomorrow.getDate() + 1);\n      const dateStr = tomorrow.toISOString().split('T')[0];\n      \n      startDateTime = dateStr;\n      endDateTime = dateStr;\n      calendarStartDateTime = dateStr;\n      calendarEndDateTime = dateStr;\n      isAllDay = true;\n      \n      console.log(`🔄 使用預設時間: ${dateStr}`);\n    }\n    \n    // 處理參與者\n    const attendees = (event.attendees || []).filter(email => \n      email && typeof email === 'string' && email.includes('@')\n    );\n    \n    // 處理信心度\n    const confidence = parseFloat(event.confidence) || 0.5;\n    console.log(`📊 事件 ${index} 信心度: ${confidence} (${Math.round(confidence * 100)}%)`);\n    \n    // 構建描述\n    const descriptionParts = [\n      event.description || '',\n      '',\n      '📋 來源信息：',\n      `• Slack 訊息: ${slackData.text || '無'}`,\n      `• 發送者: <@${slackData.user}>`,\n      `• 頻道: <#${slackData.channel}>`,\n      `• 活動類型: ${isAllDay ? '📅 全天活動' : '⏰ 部分時間活動'}`,\n      `• AI 分析信心度: ${Math.round(confidence * 100)}%`\n    ];\n    \n    if (aiOutput.reasoning) {\n      descriptionParts.push(`• 分析說明: ${aiOutput.reasoning}`);\n    }\n    \n    const description = descriptionParts.filter(line => line !== '').join('\\n');\n    \n    // 決定處理狀態\n    const eventStatus = confidence >= 0.7 ? 'high_confidence' : 'low_confidence';\n    console.log(`${confidence >= 0.7 ? '✅' : '⚠️'} 事件 ${index} ${eventStatus}`);\n    \n    // 構建輸出\n    const processedEvent = {\n      json: {\n        eventIndex: index,\n        title: event.title,\n        description: description,\n        \n        // 時間信息\n        startDateTime: calendarStartDateTime,\n        endDateTime: calendarEndDateTime,\n        isAllDay: isAllDay,\n        \n        // 地點和參與者\n        location: event.location || '',\n        attendees: attendees,\n        \n        // 分析信息\n        confidence: confidence,\n        confidenceDisplay: `${Math.round(confidence * 100)}%`,\n        reasoning: aiOutput.reasoning || '',\n        \n        // 原始信息\n        originalMessage: slackData.text || '',\n        slackUser: slackData.user,\n        slackChannel: slackData.channel,\n        slackTimestamp: slackData.ts,\n        \n        // 處理狀態\n        status: eventStatus\n      }\n    };\n    \n    console.log(`✅ 事件 ${index} 處理完成`);\n    return processedEvent;\n    \n  }).filter(event => event !== null);\n\n  // 6. 檢查處理結果\n  if (processedEvents.length === 0) {\n    console.log('❌ 沒有有效的事件可處理');\n    return [{\n      json: {\n        status: 'error',\n        error: '所有事件都處理失敗',\n        originalMessage: slackData.text,\n        slackUser: slackData.user,\n        slackChannel: slackData.channel,\n        slackTimestamp: slackData.ts\n      }\n    }];\n  }\n\n  console.log(`🎉 成功處理 ${processedEvents.length} 個事件`);\n  return processedEvents;\n  \n} catch (error) {\n  console.log('❌ 處理事件時發生錯誤:', error.message);\n  console.log('🔍 錯誤堆疊:', error.stack);\n  \n  return [{\n    json: {\n      status: 'error',\n      error: `處理失敗: ${error.message}`,\n      errorStack: error.stack,\n      originalMessage: slackData.text,\n      slackUser: slackData.user,\n      slackChannel: slackData.channel,\n      slackTimestamp: slackData.ts\n    }\n  }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        144,
+        304
+      ],
+      "id": "fdf4dab4-5de5-4205-aaf9-0592b7be28fd",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6b023445-90f7-4895-ba31-87be54e21664",
+              "leftValue": "={{ $json.confidence }}",
+              "rightValue": 0.7,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        368,
+        304
+      ],
+      "id": "08341eaa-6d95-4508-adf9-2f777da40420",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/push",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n    \"to\": \"U81025e615f2b5734e31d2715303acb5a\",\n    \"messages\":[\n        { \n            \"type\":\"text\",  \n            \"text\":\"行事曆建立失敗，信心程度過低\" \n        }\n    ]\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        816,
+        496
+      ],
+      "id": "70423981-f4d1-418b-a62d-c16e2027147d",
+      "name": "HTTP Request: Send Line Msg1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Q9Kr3IDsWDjxH8dp",
+          "name": "Line Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "failMsg",
+              "value": "=⚠️ *發現可能的日程，但信心度較低*\n\n📝 *{{ $json.rawResponse.events[0].title }}*\n🕐 時間: {{ $json.rawResponse.events[0].startDateTime }}\n📍 地點: {{$json.location || '未指定'}}\n📊 AI 信心度: {{ $json.rawResponse.events[0].confidence }} ({{$json.confidence >= 0.7 ? '高' : '低'}}信心度)\n\n💭 *AI 分析*: _{{ $json.rawResponse.reasoning }}_\n\n💡 *建議*: 如需創建日曆事件，請發送更詳細的訊息（包含確切時間、地點等資訊）\n\n_🤖 此為 AI 助手低信心度提醒，不會自動創建事件_",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "24127335-2362-4f75-a751-be05b7e32ebd",
+      "name": "Set Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        592,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ab31d2f3-999b-4ae1-8db0-88bc7bee7164",
+              "leftValue": "={{ $json.isAllDay }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        592,
+        208
+      ],
+      "id": "10f1688d-4b90-4ede-bd59-fc0f3ef0e529",
+      "name": "If All Day Event"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "abc12207@gmail.com",
+          "mode": "list",
+          "cachedResultName": "abc12207@gmail.com"
+        },
+        "start": "={{ $json.startDateTime }}",
+        "end": "={{ $json.endDateTime }}",
+        "additionalFields": {
+          "allday": "yes",
+          "description": "={{ $json.description }}",
+          "location": "={{ $json.location }}",
+          "summary": "={{ $json.title }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        816,
+        112
+      ],
+      "id": "db62a5f3-66db-4592-9a3f-826d8fcf3ced",
+      "name": "Create an event",
+      "alwaysOutputData": false,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "DdbVuHDGF2TzRIPI",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "abc12207@gmail.com",
+          "mode": "list",
+          "cachedResultName": "abc12207@gmail.com"
+        },
+        "start": "={{ $json.startDateTime }}",
+        "end": "={{ $json.endDateTime }}",
+        "additionalFields": {
+          "allday": "no",
+          "description": "={{ $json.description }}",
+          "location": "={{ $json.location }}",
+          "summary": "={{ $json.title }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        816,
+        304
+      ],
+      "id": "8156f471-f18a-4cb0-8166-872d0bef5670",
+      "name": "Create an event1",
+      "alwaysOutputData": false,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "DdbVuHDGF2TzRIPI",
+          "name": "Google Calendar account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "If All Day Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request: Send Line Msg1": {
+      "main": [
+        []
+      ]
+    },
+    "Set Variables": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request: Send Line Msg1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If All Day Event": {
+      "main": [
+        [
+          {
+            "node": "Create an event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create an event1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request: Send Line Msg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request: Send Line Msg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e21d8d6c-c83d-4d9c-87a6-284f7b5ab8dd",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cbf1298add127fa0204a2766dba48f09cc5f0b2f67e3a4a206fcf84365083c37"
+  },
+  "id": "uFwNKjs68ncMw7qh",
+  "tags": []
+}

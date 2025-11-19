@@ -1,0 +1,178 @@
+{
+  "name": "ShoppingCalendar",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        80
+      ],
+      "id": "ba1b1125-aaa5-4494-8653-982627e8b680",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "resource": "worksheet",
+        "operation": "readRows",
+        "workbook": {
+          "__rl": true,
+          "value": "9FBB0DE07F2BDB9D!s230bc0dd71bd43c8a72825f046562e9e",
+          "mode": "id"
+        },
+        "worksheet": {
+          "__rl": true,
+          "value": "{00000000-0001-0000-0000-000000000000}",
+          "mode": "list",
+          "cachedResultName": "團購清單",
+          "cachedResultUrl": "https://onedrive.live.com/personal/9fbb0de07f2bdb9d/_layouts/15/doc.aspx?resid=230bc0dd-71bd-43c8-a728-25f046562e9e&cid=9fbb0de07f2bdb9d&activeCell=%E5%9C%98%E8%B3%BC%E6%B8%85%E5%96%AE!A1"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftExcel",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        80
+      ],
+      "id": "0d74cd2e-6770-46eb-b639-d07a8fdbc22c",
+      "name": "Get rows from sheet",
+      "credentials": {
+        "microsoftExcelOAuth2Api": {
+          "id": "t4EEDYFz8RPrZt8m",
+          "name": "Microsoft Excel account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        448,
+        80
+      ],
+      "id": "8fa2506a-5117-4ac3-ba14-445c946d14ef",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "jsCode": "// N8N Code 節點：處理團購資料並準備建立 Google 日曆事件\n// 節點名稱：Process Group Buying Data\n\n// 取得所有輸入的資料項目\nconst items = $input.all();\n\n// 準備輸出陣列\nconst processedEvents = [];\n\n// 處理每一筆團購資料\nfor (const item of items) {\n  const data = item.json;\n  \n  // 1. 驗證必要欄位\n  if (!data.團購名稱 || !data.開團日期) {\n    console.log(`跳過無效資料: ${JSON.stringify(data)}`);\n    continue; // 跳過沒有名稱或日期的資料\n  }\n  \n  // 2. 組合完整的日期時間\n  const startDate = data.開團日期; // 格式: 2025-11-21\n  const endDate = data.結束日期 || data.開團日期; // 如果沒有結束日期，使用開團日期\n  const startTime = data.開團時間 || '09:00'; // 預設 09:00\n  const endTime = data.結束時間 || '18:00'; // 預設 18:00\n  \n  // 組合成 ISO 8601 格式\n  const startDateTime = `${startDate}T${startTime}:00+08:00`; // 台灣時區 UTC+8\n  const endDateTime = `${endDate}T${endTime}:00+08:00`;\n  \n  // 3. 建立事件描述（包含所有詳細資訊）\n  const description = `\n📍 地點：${data.地點 || '未指定'}\n👤 負責人：${data.負責人 || '未指定'}\n📞 聯絡電話：${data.聯絡電話 || '未提供'}\n💰 預估金額：NT$ ${data.預估金額 || '0'}\n\n📝 備註：\n${data.備註 || '無'}\n\n---\n🤖 此活動由 N8N 自動建立\n⏰ 匯入時間：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}\n  `.trim();\n  \n  // 4. 建立事件物件\n  const event = {\n    // Google Calendar 需要的欄位\n    summary: data.團購名稱, // 事件標題\n    description: description, // 事件描述\n    location: data.地點 || '', // 地點\n    startDateTime: startDateTime, // 開始時間\n    endDateTime: endDateTime, // 結束時間\n    \n    // 事件顏色 (Google Calendar 顏色 ID)\n    // 1=淡紫, 2=淡綠, 3=紫色, 4=粉紅, 5=黃色, 6=橘色, 7=青色, 8=灰色, 9=藍色, 10=綠色, 11=紅色\n    colorId: '9', // 藍色\n    \n    // 提醒設定\n    reminders: {\n      useDefault: false,\n      overrides: [\n        { method: 'popup', minutes: 1440 }, // 提前 1 天提醒\n        { method: 'popup', minutes: 60 },   // 提前 1 小時提醒\n      ]\n    },\n    \n    // 自訂屬性（用於追蹤和去重）\n    extendedProperties: {\n      private: {\n        source: 'onedrive_excel',\n        importDate: new Date().toISOString(),\n        responsiblePerson: data.負責人 || '',\n        estimatedAmount: data.預估金額 || ''\n      }\n    },\n    \n    // 保留原始資料（方便除錯）\n    _originalData: data\n  };\n  \n  // 5. 加入到輸出陣列\n  processedEvents.push({\n    json: event,\n    pairedItem: { item: item.pairedItem?.item || 0 }\n  });\n}\n\n// 輸出處理後的資料\nconsole.log(`成功處理 ${processedEvents.length} 筆團購資料`);\nreturn processedEvents;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "d2e374bb-1471-4775-9a13-6bbfe0acabe7",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "abc12207@gmail.com",
+          "mode": "list",
+          "cachedResultName": "abc12207@gmail.com"
+        },
+        "start": "={{ $json.startDateTime }}",
+        "end": "={{ $json.endDateTime }}",
+        "additionalFields": {
+          "allday": "no",
+          "color": "={{ $json.colorId }}",
+          "description": "={{ $json.description }}",
+          "location": "={{ $json.location }}",
+          "summary": "={{ $json.summary }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        896,
+        80
+      ],
+      "id": "a184f8b8-09c4-4198-a403-20188b6c1fe3",
+      "name": "Create an event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "DdbVuHDGF2TzRIPI",
+          "name": "Google Calendar account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get rows from sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get rows from sheet": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Create an event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "a136f344-907c-400d-af45-05cb765d31dc",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "cbf1298add127fa0204a2766dba48f09cc5f0b2f67e3a4a206fcf84365083c37"
+  },
+  "id": "1ocyjZR4RZSpPHGP",
+  "tags": []
+}
