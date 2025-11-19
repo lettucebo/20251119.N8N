@@ -1,0 +1,479 @@
+{
+  "name": "line-azure-openai-google-calendar",
+  "nodes": [
+    {
+      "id": "node-line-webhook",
+      "name": "LINE Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -1800,
+        200
+      ],
+      "parameters": {
+        "path": "line-itinerary",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "responseData": "auto",
+        "options": {
+          "rawBody": false,
+          "responseContentType": "application/json"
+        }
+      },
+      "webhookId": "9c65b7b1-e2dc-4c67-9a4b-4b8f0fe8b8f5"
+    },
+    {
+      "id": "node-verify-signature",
+      "name": "Verify Signature",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        -1540,
+        200
+      ],
+      "parameters": {
+        "functionCode": "const crypto = require('crypto');\n\nconst headers = $json.headers || {};\nconst signatureHeader = headers['x-line-signature'] || headers['X-Line-Signature'] || headers['x-Line-Signature'];\nconst rawBody = $json.body ?? $json;\nconst secret = $env.LINE_CHANNEL_SECRET || '';\nconst bodyString = typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody);\nconst computed = crypto.createHmac('sha256', secret).update(bodyString).digest('base64');\n\nreturn [{\n  json: {\n    signatureValid: signatureHeader === computed,\n    rawBody,\n    bodyString,\n    headers,\n    replyToken: rawBody?.events?.[0]?.replyToken || '',\n    messageText: rawBody?.events?.[0]?.message?.text || '',\n    source: rawBody?.events?.[0]?.source || {},\n    eventTimestamp: rawBody?.events?.[0]?.timestamp || null\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-if-signature",
+      "name": "Signature OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -1300,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json[\"signatureValid\"]}}",
+              "value2": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-reject",
+      "name": "Respond Invalid Signature",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 2,
+      "position": [
+        -1080,
+        20
+      ],
+      "parameters": {
+        "responseMode": "lastNode",
+        "responseData": "json",
+        "responseBody": "={\n  \"status\": \"error\",\n  \"message\": \"Invalid LINE signature\"\n}",
+        "options": {
+          "responseCode": 403
+        }
+      }
+    },
+    {
+      "id": "node-parse-payload",
+      "name": "Parse Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        -1080,
+        360
+      ],
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "messageText",
+              "value": "={{$json[\"messageText\"]}}"
+            },
+            {
+              "name": "replyToken",
+              "value": "={{$json[\"replyToken\"]}}"
+            },
+            {
+              "name": "userId",
+              "value": "={{$json.source?.userId || $json.source?.groupId || $json.source?.roomId || \"unknown\"}}"
+            },
+            {
+              "name": "timezone",
+              "value": "Asia/Taipei"
+            },
+            {
+              "name": "contextId",
+              "value": "={{$json.source?.userId || $json.replyToken}}"
+            },
+            {
+              "name": "calendarId",
+              "value": "={{$env.DEFAULT_CALENDAR_ID}}"
+            }
+          ],
+          "json": [
+            {
+              "name": "rawBody",
+              "value": "={{$json[\"rawBody\"]}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-azure-extractor",
+      "name": "Azure Extractor",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 5,
+      "position": [
+        -840,
+        360
+      ],
+      "parameters": {
+        "resource": "chat",
+        "operation": "chat",
+        "modelId": "gpt-4o-mini",
+        "messages": [
+          {
+            "role": "system",
+            "content": "你是一個行程整理助手，請輸出 JSON。"
+          },
+          {
+            "role": "user",
+            "content": "={{$json[\"messageText\"]}}"
+          }
+        ],
+        "responseFormat": "json_object",
+        "additionalFields": {
+          "temperature": 0.2,
+          "maxTokens": 800,
+          "useAzureOpenAiApi": true
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "name": "Azure OpenAI (demo)"
+        }
+      }
+    },
+    {
+      "id": "node-merge-ai",
+      "name": "Merge AI Response",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        -620,
+        360
+      ],
+      "parameters": {
+        "mode": "mergeByPosition"
+      }
+    },
+    {
+      "id": "node-parse-ai-json",
+      "name": "Parse AI JSON",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        360
+      ],
+      "parameters": {
+        "functionCode": "const rawContent = $json.choices?.[0]?.message?.content || '';\nlet parsed;\ntry {\n  parsed = typeof rawContent === 'string' ? JSON.parse(rawContent) : rawContent;\n} catch (error) {\n  parsed = { items: [], context: { parseError: error.message } };\n}\nreturn [{\n  json: {\n    aiItems: parsed.items || [],\n    aiContext: parsed.context || {},\n    replyToken: $json.replyToken,\n    userId: $json.userId,\n    messageText: $json.messageText,\n    timezone: $json.timezone || 'Asia/Taipei',\n    calendarId: $json.calendarId,\n    contextId: $json.contextId\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-validate-slots",
+      "name": "Validate Slots",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -120,
+        360
+      ],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json[\"aiItems\"].length}}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-no-items",
+      "name": "No Items Reply Builder",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        120,
+        160
+      ],
+      "parameters": {
+        "functionCode": "return [{\n  json: {\n    replyToken: $json.replyToken,\n    replyText: '目前訊息中未找到具體行程，請再補充時間與內容。',\n    contextId: $json.contextId\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-format-dates",
+      "name": "Format Dates",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        120,
+        520
+      ],
+      "parameters": {
+        "functionCode": "const { DateTime } = require('luxon');\nconst timezone = $json.timezone || 'Asia/Taipei';\nconst normalized = [];\n($json.aiItems || []).forEach((item, index) => {\n  const zone = item.timezone || timezone;\n  const start = item.start ? DateTime.fromISO(item.start, { zone }) : DateTime.now().setZone(zone);\n  const end = item.end ? DateTime.fromISO(item.end, { zone }) : start.plus({ minutes: 60 });\n  normalized.push({\n    json: {\n      summary: item.title || `行程 ${index + 1}`,\n      location: item.location || '',\n      description: `${item.note || ''}\n---\n來源：${$json.messageText || ''}`.trim(),\n      start: start.toISO(),\n      end: end.toISO(),\n      timezone: zone,\n      replyToken: $json.replyToken,\n      aiContext: $json.aiContext || {},\n      calendarId: $json.calendarId,\n      contextId: $json.contextId,\n      messageText: $json.messageText\n    },\n    pairedItem: { item: index }\n  });\n});\nreturn normalized;"
+      }
+    },
+    {
+      "id": "node-google-calendar",
+      "name": "Google Calendar",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 4,
+      "position": [
+        360,
+        520
+      ],
+      "parameters": {
+        "operation": "create",
+        "calendar": "={{$json[\"calendarId\"]}}",
+        "start": "={{$json[\"start\"]}}",
+        "end": "={{$json[\"end\"]}}",
+        "options": {
+          "summary": "={{$json[\"summary\"]}}",
+          "description": "={{$json[\"description\"]}}",
+          "location": "={{$json[\"location\"]}}",
+          "timeZone": "={{$json[\"timezone\"]}}"
+        }
+      },
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "name": "Google Calendar Service Account"
+        }
+      }
+    },
+    {
+      "id": "node-build-success-reply",
+      "name": "Build Success Reply",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        120,
+        360
+      ],
+      "parameters": {
+        "functionCode": "const items = $json.aiItems || [];\nconst lines = items.map((item, index) => `${index + 1}. ${(item.title || '未命名行程')} (${item.start || '時間未定'})`);\nconst summary = lines.join('\n');\nreturn [{\n  json: {\n    replyToken: $json.replyToken,\n    replyText: `已建立 ${items.length} 筆行程：\n${summary}`.trim(),\n    contextId: $json.contextId\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-line-reply",
+      "name": "Reply LINE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        620,
+        260
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "jsonParameters": true,
+        "options": {
+          "headers": {
+            "Content-Type": "application/json"
+          }
+        },
+        "bodyParametersJson": "={\n  \"replyToken\": {{$json.replyToken}},\n  \"messages\": [\n    {\n      \"type\": \"text\",\n      \"text\": {{$json.replyText}}\n    }\n  ]\n}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "LINE Messaging API"
+        }
+      }
+    },
+    {
+      "id": "node-webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 2,
+      "position": [
+        860,
+        260
+      ],
+      "parameters": {
+        "responseMode": "lastNode",
+        "responseData": "json",
+        "responseBody": "={\n  \"status\": \"ok\",\n  \"contextId\": {{$json.contextId || 'n/a'}}\n}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "LINE Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify Signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Signature": {
+      "main": [
+        [
+          {
+            "node": "Signature OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature OK?": {
+      "main": [
+        [
+          {
+            "node": "Parse Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid Signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Payload": {
+      "main": [
+        [
+          {
+            "node": "Azure Extractor",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge AI Response",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Azure Extractor": {
+      "main": [
+        [
+          {
+            "node": "Merge AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge AI Response": {
+      "main": [
+        [
+          {
+            "node": "Parse AI JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI JSON": {
+      "main": [
+        [
+          {
+            "node": "Validate Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Slots": {
+      "main": [
+        [
+          {
+            "node": "Format Dates",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Success Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Items Reply Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Dates": {
+      "main": [
+        [
+          {
+            "node": "Google Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Success Reply": {
+      "main": [
+        [
+          {
+            "node": "Reply LINE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Items Reply Builder": {
+      "main": [
+        [
+          {
+            "node": "Reply LINE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply LINE": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "timezone": "Asia/Taipei"
+  },
+  "pinData": {}
+}
